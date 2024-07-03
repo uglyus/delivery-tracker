@@ -33,7 +33,9 @@ heroku create [app-name]
 heroku stack:set container -a [app-name]
 docker build --platform linux/amd64 -t registry.heroku.com/[app-name]/web .
 docker push registry.heroku.com/[app-name]/web
+heroku config:set API_KEY=[API_KEY] -a [app-name]
 heroku container:release web -a [app-name]
+heroku logs --tail -a [app-name]
 heroku open -a [app-name]
 ```
 
