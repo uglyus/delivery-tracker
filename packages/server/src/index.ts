@@ -77,10 +77,13 @@ async function main(): Promise<void> {
     carrierRegistry,
   };
 
+  const PORT = process.env.PORT ?? 4000;
+
   const { url } = await startStandaloneServer(server, {
     context: async ({ req, res }) => ({
       appContext,
     }),
+    listen: { port: +PORT },
   });
   serverRootLogger.info(`🚀 Server ready at ${url}`);
 }
