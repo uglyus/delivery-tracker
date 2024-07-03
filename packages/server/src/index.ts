@@ -11,6 +11,7 @@ import {
   logger as coreLogger,
 } from "@delivery-tracker/core";
 import { initLogger } from "./logger";
+import { validateApiKey } from "./auth";
 
 const serverRootLogger: winston.Logger = coreLogger.rootLogger.child({
   module: "server",
@@ -80,9 +81,17 @@ async function main(): Promise<void> {
   const PORT = process.env.PORT ?? 4000;
 
   const { url } = await startStandaloneServer(server, {
-    context: async ({ req, res }) => ({
-      appContext,
-    }),
+    context: async ({ req, res }) => {
+      const apiKey = req.headers["x-api-key"] as string | undefined;
+
+      if (!validateApiKey(apiKey)) {
+        throw new Error("유효하지 않은 API 키입니다");
+      }
+
+      return {
+        appContext,
+      };
+    },
     listen: { port: +PORT },
   });
   serverRootLogger.info(`🚀 Server ready at ${url}`);
