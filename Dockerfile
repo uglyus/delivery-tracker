@@ -1,26 +1,29 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS build
 RUN npm install -g pnpm@8
-
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-
-FROM base AS prod-deps
-WORKDIR /app
-COPY . /app
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile
-
-FROM base AS build
 WORKDIR /app
 COPY . /app
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 RUN pnpm --filter @delivery-tracker/server build-with-deps
 
-FROM prod-deps
-COPY --from=build /app/packages/api/dist /app/packages/api/dist
-COPY --from=build /app/packages/core/dist /app/packages/core/dist
-COPY --from=build /app/packages/server/dist /app/packages/server/dist
+FROM public.ecr.aws/lambda/nodejs:20
 
-WORKDIR /app/packages/server
+WORKDIR ${LAMBDA_TASK_ROOT}
 
-ENV NODE_ENV=production
-CMD ["pnpm", "start"]
+RUN npm install -g pnpm@8
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/api/package.json packages/api/
+COPY packages/core/package.json packages/core/
+COPY packages/server/package.json packages/server/
+
+RUN pnpm install --prod --frozen-lockfile
+
+COPY --from=build /app/packages/api/dist packages/api/dist
+COPY --from=build /app/packages/core/dist packages/core/dist
+COPY --from=build /app/packages/server/dist packages/server/dist
+
+CMD ["packages/server/dist/lambda.handler"]
