@@ -1,4 +1,4 @@
-# Delivery Tracker
+# Uglyus Delivery Tracker
 
 Delivery and Shipping Tracking Service
 
@@ -6,34 +6,36 @@ Delivery and Shipping Tracking Service
 ### Cloud (Managed Service)
 Visit : https://tracker.delivery/docs/try
 
-### Self-Hosted
-#### Setting Up the Development Environment
-Delivery Tracker can be set up in local development environments and is also readily available for setup through GitHub Codespaces.
+문서 참조 : https://tracker.delivery
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/shlee322/delivery-tracker)
+Self-hosted Uglyus Delivery Tracker API를 위한 요청을 하기 위해서 header에 `x-api-key`를 추가해야 합니다.
 
-Follow the instructions below for GitHub Codespaces:
+### 예시
 
-1. Click the "Open in GitHub Codespaces" button above to create a new Codespace.
-2. Once in your Codespace terminal, enter `pnpm install` to install the necessary dependencies.
-3. In GitHub Codespaces, navigate to the "Run and Debug" section from the sidebar and then click the "Run" button for "@delivery-tracker/server" to launch the server.
-4. The service URL can be accessed via the Ports panel at the bottom of the GitHub Codespaces interface.
+```
+curl --request POST \
+  --url 'http://localhost:4000/graphql' \
+  --header 'Content-Type: application/json' \
+  --header 'x-api-key: 1234567890' \
+  --data '{"query":"query Track(\n  $carrierId: ID!,\n  $trackingNumber: String!\n) {\n  track(\n    carrierId: $carrierId,\n    trackingNumber: $trackingNumber\n  ) {\n    lastEvent {\n      time\n      status {\n        code\n      }\n    }\n  }\n}","variables":{"carrierId":"kr.cjlogistics","trackingNumber":"1234567890"}}'
+```
 
-#### Deploying Self-Hosted Services
-See `Dockerfile`
+## Deployment - Heroku
 
-## Additional Information
-### License
-- Please read the `LICENSE` file.
+Heroku에서 PORT설정이 항상 바뀌기 때문에 PORT 설정을 해줘야 합니다.
 
-### Contact
-- Please contact `contact@tracker.delivery` for more information.
+참고 : [Why is my Node.js app crashing with an R10 error?](https://help.heroku.com/P1AVPANS/why-is-my-node-js-app-crashing-with-an-r10-error)
 
-### Project Structure
-- packages/api : GraphQL API
-- packages/core : Scraper code
-- packages/cli : A Command Line Interface (CLI) tool that uses the execute function from packages/api.
-- packages/http : A self-hosted GraphQL HTTP server that uses the execute function from packages/api.
+```
+heroku login
+heroku container:login
+heroku create [app-name]
+heroku stack:set container -a [app-name]
+docker build --platform linux/amd64 -t registry.heroku.com/[app-name]/web .
+docker push registry.heroku.com/[app-name]/web
+heroku config:set API_KEY=[API_KEY] -a [app-name]
+heroku container:release web -a [app-name]
+heroku logs --tail -a [app-name]
+heroku open -a [app-name]
+```
 
-### Request additional carriers
-See https://tracker.delivery/request-additional-carrier
