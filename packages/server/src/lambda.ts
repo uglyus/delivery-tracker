@@ -1,9 +1,13 @@
 import type * as winston from "winston";
-import { ApolloServer } from "@apollo/server";
 import {
-  ApolloServerErrorCode,
-  unwrapResolverError,
-} from "@apollo/server/errors";
+  execute,
+  parse,
+  validate,
+  type ExecutionResult,
+  type GraphQLError,
+  type GraphQLFormattedError,
+} from "graphql";
+import { makeExecutableSchema } from "@graphql-tools/schema";
 import { typeDefs, resolvers, type AppContext } from "@delivery-tracker/api";
 import {
   DefaultCarrierRegistry,
@@ -15,57 +19,9 @@ const serverRootLogger: winston.Logger = coreLogger.rootLogger.child({
   module: "server",
 });
 
-const server = new ApolloServer({
+const schema = makeExecutableSchema({
   typeDefs,
   resolvers: resolvers.resolvers,
-  formatError: (formattedError, error) => {
-    const extensions = formattedError.extensions ?? {};
-    switch (extensions.code) {
-      case "INTERNAL":
-      case "BAD_REQUEST":
-      case "NOT_FOUND":
-      case ApolloServerErrorCode.INTERNAL_SERVER_ERROR:
-        extensions.code = "INTERNAL";
-        break;
-      case ApolloServerErrorCode.GRAPHQL_PARSE_FAILED:
-        extensions.code = "BAD_REQUEST";
-        break;
-      case ApolloServerErrorCode.GRAPHQL_VALIDATION_FAILED:
-        extensions.code = "BAD_REQUEST";
-        break;
-      case ApolloServerErrorCode.PERSISTED_QUERY_NOT_FOUND:
-        extensions.code = "BAD_REQUEST";
-        break;
-      case ApolloServerErrorCode.PERSISTED_QUERY_NOT_SUPPORTED:
-        extensions.code = "BAD_REQUEST";
-        break;
-      case ApolloServerErrorCode.BAD_USER_INPUT:
-        extensions.code = "BAD_REQUEST";
-        break;
-      case ApolloServerErrorCode.OPERATION_RESOLUTION_FAILURE:
-        extensions.code = "BAD_REQUEST";
-        break;
-      default:
-        extensions.code = "INTERNAL";
-        break;
-    }
-
-    if (extensions.code === "INTERNAL") {
-      serverRootLogger.error("internal error response", {
-        formattedError,
-        error: unwrapResolverError(error),
-      });
-    }
-
-    return {
-      ...formattedError,
-      extensions,
-      message:
-        extensions.code === "INTERNAL"
-          ? "Internal error"
-          : formattedError.message,
-    };
-  },
 });
 
 const carrierRegistry = new DefaultCarrierRegistry();
@@ -79,16 +35,46 @@ interface LambdaEvent {
 
 interface LambdaResponse {
   data?: Record<string, unknown> | null;
-  errors?: ReadonlyArray<{
-    message: string;
-    extensions?: Record<string, unknown>;
-  }>;
+  errors?: readonly GraphQLFormattedError[];
+}
+
+function formatError(error: GraphQLError): GraphQLFormattedError {
+  const extensions: Record<string, unknown> = { ...(error.extensions ?? {}) };
+  const originalCode = extensions.code;
+
+  switch (originalCode) {
+    case "INTERNAL":
+    case "BAD_REQUEST":
+    case "NOT_FOUND":
+      break;
+    case "GRAPHQL_PARSE_FAILED":
+    case "GRAPHQL_VALIDATION_FAILED":
+    case "BAD_USER_INPUT":
+      extensions.code = "BAD_REQUEST";
+      break;
+    default:
+      extensions.code = "INTERNAL";
+      break;
+  }
+
+  if (extensions.code === "INTERNAL") {
+    serverRootLogger.error("internal error response", {
+      message: error.message,
+      originalError: error.originalError,
+    });
+  }
+
+  return {
+    message: extensions.code === "INTERNAL" ? "Internal error" : error.message,
+    locations: error.locations,
+    path: error.path,
+    extensions,
+  };
 }
 
 export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
   if (!initialized) {
     initLogger();
-    await server.start();
     await carrierRegistry.init();
     initialized = true;
   }
@@ -97,17 +83,41 @@ export const handler = async (event: LambdaEvent): Promise<LambdaResponse> => {
     carrierRegistry,
   };
 
-  const result = await server.executeOperation(
-    {
-      query: event.query,
-      variables: event.variables,
-      operationName: event.operationName,
-    },
-    { contextValue: { appContext } }
-  );
-
-  if (result.body.kind === "single") {
-    return result.body.singleResult;
+  let document;
+  try {
+    document = parse(event.query);
+  } catch (syntaxError) {
+    return {
+      errors: [
+        {
+          message: (syntaxError as Error).message,
+          extensions: { code: "BAD_REQUEST" },
+        },
+      ],
+    };
   }
-  return { errors: [{ message: "Incremental delivery not supported" }] };
+
+  const validationErrors = validate(schema, document);
+  if (validationErrors.length > 0) {
+    return {
+      errors: validationErrors.map((error) => ({
+        message: error.message,
+        locations: error.locations,
+        extensions: { code: "BAD_REQUEST" },
+      })),
+    };
+  }
+
+  const result: ExecutionResult = await execute({
+    schema,
+    document,
+    variableValues: event.variables,
+    operationName: event.operationName,
+    contextValue: { appContext },
+  });
+
+  return {
+    data: result.data as Record<string, unknown> | null | undefined,
+    errors: result.errors?.map(formatError),
+  };
 };
