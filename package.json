@@ -15,5 +15,12 @@
     "eslint-plugin-promise": "^6.1.1",
     "prettier": "^2.8.8",
     "typescript": "^5.0.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "typescript@>=6": "~5.1.6",
+      "ws@>=8 <8.21.0": "^8.21.0",
+      "form-data@>=4 <4.0.6": "^4.0.6"
+    }
   }
 }
